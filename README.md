@@ -1,2 +1,329 @@
-# WhereWindsMeet-Lua-Injector
-Proof-of-concept Lua script injector for Where Winds Meet using a dinput8 proxy DLL and Frida Gadget to hook the game’s internal lua_load / lua_pcall and open debug / GM features.
+# WhereWindsMeet-Lua-Frida-Injector
+
+**Proof-of-concept Lua injector for _Where Winds Meet_ (PC)** using:
+
+- a **proxy `dinput8.dll`** placed in the same folder as `wwm.exe` (the game executable)
+- **Frida Gadget** (`frida-gadget.dll`)
+- a small **Python loader** (`Loader_gadget.py`)
+- a **Frida JS script** (`hook.js`) that hooks the game’s internal `lua_load` and `lua_pcall`
+
+This mini project was built as an experiment to confirm that:
+- the game uses a **custom Lua 5.4 VM** internally, and  
+- it is possible to **inject and run custom Lua scripts**, open the debug / GM console and tweak various flags.
+
+It is **not** a polished tool or trainer, just a working testbed.
+
+> ⚠️ **Disclaimer**
+> - This project is for **educational / reverse-engineering purposes only**.  
+
+
+---
+
+## Project layout
+
+Everything lives under:
+
+```text
+C:\temp\Where Winds Meet\
+```
+
+Example layout:
+
+```text
+C:\temp\Where Winds Meet\
+│
+├─ Scripts\
+│   └─ Test.lua                # Example Lua test script (entry point)
+│
+├─ dinput8.dll                 # Proxy DLL, placed next to wwm.exe (game folder)
+├─ frida-gadget.config         # Frida Gadget configuration
+├─ frida-gadget.dll            # Frida Gadget binary
+├─ hook.js                     # Frida JS script (hooks lua_load / lua_pcall)
+└─ Loader_gadget.py            # Python loader for Frida Gadget
+```
+
+The **proxy `dinput8.dll`** is dropped in the **game folder** (next to `wwm.exe`).  
+At runtime, it will:
+
+1. Load the real system `dinput8.dll` from:
+
+   ```text
+   C:\Windows\System32\dinput8.dll
+   ```
+
+2. Also load **`frida-gadget.dll`** from:
+
+   ```text
+   C:\temp\Where Winds Meet\
+   ```
+
+From there, Frida Gadget injects `hook.js` into the `wwm.exe` process.
+
+
+---
+
+## How it works (high level)
+
+1. **Game start & dinput proxy**
+   - When `wwm.exe` starts, Windows loads `dinput8.dll` from the **game directory first**.
+   - Our **proxy `dinput8.dll`** forwards calls to the **real** `dinput8.dll` in `System32`, so the game still works normally.
+   - It also loads `frida-gadget.dll` (Frida Gadget) from `C:\temp\Where Winds Meet\`.
+
+2. **Frida Gadget + Python loader**
+   - `frida-gadget.dll` exposes a Frida Gadget endpoint (default: `127.0.0.1:27042`).
+   - `Loader_gadget.py` connects to this Gadget and injects the JS script `hook.js` into `wwm.exe`.
+
+3. **Hooking `lua_load` and `lua_pcall`**
+   - `hook.js` scans `wwm.exe` for the internal Lua functions using the following x64 signatures:
+
+     ```c
+     const SIG_LUA_LOAD =
+       "48 89 5C 24 10 56 48 83 EC 50 49 8B D9 48 8B F1 4D 8B C8 4C 8B C2 48 8D 54 24 20";
+
+     const SIG_LUA_PCALL =
+       "48 89 74 24 18 57 48 83 EC 40 33 F6 48 89 6C 24 58 49 63 C1 41 8B E8 48 8B F9 45 85 C9";
+     ```
+
+   - Once the addresses are found, it creates `NativeFunction` wrappers and hooks `lua_pcall`.
+   - When you press **key `1`**, the script arms an injection: on the **next `lua_pcall`**, a minimal Lua loader chunk is executed.
+
+4. **Lua loader + `Test.lua`**
+   - The injected Lua chunk does essentially:
+
+     ```lua
+     local path = [[C:\temp\Where Winds Meet\Scripts\Test.lua]]
+     local f, err = loadfile(path)
+     if not f then
+       print("[inject] loadfile failed:", err)
+     else
+       local ok, err2 = pcall(f)
+       if not ok then
+         print("[inject] error in Test.lua:", err2)
+       end
+     end
+     ```
+
+   - This means **all your actual logic lives in `Scripts\Test.lua`** (or whatever you point it to):
+     - Enable debug / GM menu
+     - Toggle debug flags
+     - Patch game tables, etc.
+
+
+---
+
+## Requirements
+
+- **OS**: Windows x64
+- **Game**: PC version of *Where Winds Meet*
+- **Python**: 3.x (e.g. 3.10+)
+- **Python modules**:
+  - [`frida`](https://pypi.org/project/frida/)
+  - `argparse` & `json` (standard library; no extra install needed)
+
+Install Frida for Python:
+
+```bash
+pip install frida
+# (frida-tools optional but useful)
+pip install frida-tools
+```
+
+
+---
+
+## Setup
+
+### 1. Clone / copy the project
+
+Place the project under:
+
+```text
+C:\temp\Where Winds Meet\
+```
+
+You should end up with:
+
+```text
+C:\temp\Where Winds Meet\
+│   dinput8.dll
+│   frida-gadget.dll
+│   frida-gadget.config
+│   hook.js
+│   Loader_gadget.py
+└── Scripts\
+    └── Test.lua
+```
+
+### 2. Drop the proxy DLL into the game folder
+
+Find your game install folder and place **`dinput8.dll`** next to `wwm.exe`, for example:
+
+```text
+<Your Game Folder>\...\wwm.exe
+<Your Game Folder>\...\dinput8.dll   # <-- proxy DLL from this project
+```
+
+The system `dinput8.dll` in `C:\Windows\System32\` remains untouched.
+
+### 3. Make sure Python + Frida are installed
+
+- Install [Python 3](https://www.python.org/) if not already installed.
+- Install the Frida Python package:
+
+  ```bash
+  pip install frida
+  ```
+
+`argparse` and `json` are included in Python’s standard library, so nothing extra is needed for them.
+
+### 4. Check / adjust `frida-gadget.config` (optional)
+
+By default, the config is expected to:
+- listen on `127.0.0.1:27042`
+- use `hook.js` as the injected script (via `Loader_gadget.py`)
+
+You can adjust behavior if needed, but the provided config is meant for the described workflow.
+
+
+---
+
+## Launch & usage
+
+### 1. Start the game
+
+1. Launch *Where Winds Meet* normally.
+2. Wait until the actual **`wwm.exe`** game process is running (not just the launcher).
+
+### 2. Run the Python loader
+
+Open **PowerShell** in the project directory:
+
+```powershell
+PS C:\temp\Where Winds Meet> python Loader_gadget.py
+# or, depending on your setup:
+PS C:\temp\Where Winds Meet> py Loader_gadget.py
+```
+
+The script will:
+
+- Connect to Frida Gadget at `127.0.0.1:27042`
+- Attach to the `wwm.exe` process
+- Load `hook.js`
+- Start logging Frida messages to `frida_hook_log.json`
+
+You should see logs like:
+
+```text
+[*] Connecting to Gadget at 127.0.0.1:27042 ...
+[OK] Selected process: pid=... name=wwm.exe
+[*] Attach ...
+[OK] Script loaded: hook.js
+[📄] Logs -> C:\temp\Where Winds Meet\frida_hook_log.json
+[⏳] Ctrl+C to quit.
+```
+
+### 3. Trigger Lua injection
+
+- Once the injector is running and the game is in Lua code:
+  - Press the **`1` key** (top row numeric key) in the console window that runs `hook.js` / Frida.
+  - The script arms an injection: at the **next call to `lua_pcall`** inside the game, the loader chunk is executed.
+  - That loader then performs `loadfile + pcall` on:
+
+    ```text
+    C:\temp\Where Winds Meet\Scripts\Test.lua
+    ```
+
+> ⚠️ Some Lua scripts (for example those enabling the debug / GM menu) must be injected **before the end of the loading sequence** to take effect properly.  
+> If injection is “too late”, you may need to restart the game and trigger the hotkey earlier.
+
+### 4. Stopping the injector
+
+- Press **Ctrl+C** in the console where `Loader_gadget.py` is running.
+- The script will try to unload the Frida script and detach cleanly:
+
+```text
+[*] Done.
+```
+
+
+---
+
+## Writing your own Lua scripts
+
+The entry point used by the loader is:
+
+```text
+C:\temp\Where Winds Meet\Scripts\Test.lua
+```
+
+Inside `Test.lua`, you can:
+
+- Open or configure the **debug / GM menu**
+- Modify global tables or flags
+- Use helper scripts (like `Debug_console.lua`) to recursively force flags such as:
+
+  ```lua
+  DEBUG                     = true
+  DISABLE_ACSDK             = true
+  ENABLE_DEBUG_PRINT        = true
+  ENABLE_FORCE_SHOW_GM      = true
+  FORCE_OPEN_DEBUG_SHORTCUT = true
+  GM_IS_OPEN_GUIDE          = true
+  GM_USE_PUBLISH            = true
+  acsdk_info_has_inited     = false
+  ```
+
+Anything reachable from the game’s Lua environment can potentially be inspected or patched.
+
+
+---
+
+## Turning this into a “real” project
+
+This repository is currently just a **research / PoC setup**.  
+To turn it into a more serious / robust project, you would probably want to:
+
+1. **Remove the Frida dependency**
+   - Implement a custom native DLL that:
+     - Loads into `wwm.exe` (still via `dinput8.dll` proxy or another injection method).
+     - Scans for `lua_load` / `lua_pcall` signatures internally.
+     - Hooks them using a library like **MinHook** or your own trampoline code or others hooking methods.
+   - Expose your own API to execute Lua chunks from disk or memory.
+
+2. **Handle game updates / versions**
+   - The current signatures are intentionally chosen to be resilient to address changes caused by recompilation.
+   - However, major code changes or layout differences between builds can still break them, so it’s worth adding version checks / sanity checks (e.g. game build, module size, extra validation around scan results).
+   - Optionally provide a small diagnostic mode that only scans, reports the found addresses, and verifies they look like valid `lua_load` / `lua_pcall` before enabling any hooks.
+
+3. **Better configuration & UX**
+   - Config file to:
+     - Change the Lua script path (not only `Scripts\Test.lua`).
+     - Enable/disable auto-flag modifications (debug flags, GM, etc.).
+   - In-game UI overlays or an external controller instead of a plain console + key `1`.
+
+4. **Safety & stability**
+   - Better error handling around injection timing.
+   - Logging of Lua errors, stack traces, etc. into a dedicated log view.
+   - Optionally provide a “dry run” / inspection mode that only dumps tables and does not patch anything.
+
+5. **Abstraction for Lua utilities**
+   - Helpers to:
+     - Inspect global tables
+     - Patch flags in a controlled way
+     - Register new commands / console actions
+   - Possibly wrap the internal Lua state with a small C API for power users.
+
+
+---
+
+## Status
+
+- ✅ Verified that:
+  - The game uses a **custom Lua 5.4 VM**.
+  - It is possible to **inject and run custom Lua scripts**.
+  - Debug / GM related behavior can be toggled via Lua.
+- ⚠️ PoC quality only:
+  - Uses Frida + Gadget.
+  - No guarantees on compatibility or stability.
+
+Use at your own risk, and have fun exploring the game’s Lua internals 🙂
