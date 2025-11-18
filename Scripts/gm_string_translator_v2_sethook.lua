@@ -17,8 +17,8 @@ _G.GM_STRING_TRANSLATOR_V2_INSTALLED = true
 -----------------------------------------
 -- Config : chemins
 -----------------------------------------
-local DICT_PATH = [[C:\temp\Where Winds Meet\gm_strings_dict.lua]]
-local LOG_PATH  = [[C:\temp\Where Winds Meet\gm_strings_log.txt]]
+local DICT_PATH = [[C:\temp\Where Winds Meet\Scripts\gm_strings_dict.lua]]
+local LOG_PATH  = [[C:\temp\Where Winds Meet\Scripts\gm_strings_log.txt]]
 local ENABLE_LOG = true
 
 -----------------------------------------
@@ -400,3 +400,4 @@ end
 
 debug.sethook(hook, "c")
 return true
+
